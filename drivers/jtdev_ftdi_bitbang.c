@@ -47,7 +47,7 @@
 #define TCK   FTDI_TXD
 #define RESET FTDI_DCD // OpenOCD uses this as the default SYSRST pin
 
-#define OUT_BITS (TDI | TMS | TCK | RESET)
+#define OUT_BITS (TDI | TMS | TCK | RESET | 0xF0)
 
 #define DEFAULT_VID 0x0403
 static const uint16_t default_pids[] = {
@@ -166,7 +166,8 @@ static int jtbitbang_set_fast_baud(struct jtdev *p, bool fast)
 	int f;
 	// baud is multiplied by 4 for some reason in bitbang mode?
 	//int baud = fast ? 350000/4 : 9600/4;
-	int baud = fast ? 350000 : 9600;
+	// int baud = fast ? 350000 : 9600;
+	int baud = fast ? 350000*4 : 9600;
 
 	if((f = ftdi_set_baudrate(p->handle, baud)) < 0) {
 		ftdi_print_err("unable to set ftdi baud", f, p);

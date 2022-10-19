@@ -97,7 +97,7 @@ else
 endif
 
 INCLUDES = -I. -Isimio -Iformats -Itransport -Idrivers -Iutil -Iui
-GCC_CFLAGS = -O1 -Wall -Wno-char-subscripts -ggdb
+GCC_CFLAGS = -O1 -Wall -Wextra -Wno-unused-parameter -Wno-char-subscripts -ggdb
 CONFIG_CFLAGS = -DLIB_DIR=\"$(LIBDIR)\"
 
 MSPDEBUG_LDFLAGS = $(LDFLAGS) $(PORTS_LDFLAGS)
