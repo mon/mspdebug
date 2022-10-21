@@ -164,10 +164,7 @@ static void jtbitbang_close(struct jtdev *p)
 static int jtbitbang_set_fast_baud(struct jtdev *p, bool fast)
 {
 	int f;
-	// baud is multiplied by 4 for some reason in bitbang mode?
-	//int baud = fast ? 350000/4 : 9600/4;
-	// int baud = fast ? 350000 : 9600;
-	int baud = fast ? 350000*4 : 9600;
+	int baud = fast ? 350000 : 9600;
 
 	if((f = ftdi_set_baudrate(p->handle, baud)) < 0) {
 		ftdi_print_err("unable to set ftdi baud", f, p);
