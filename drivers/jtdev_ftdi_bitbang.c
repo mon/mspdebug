@@ -164,13 +164,13 @@ static void jtbitbang_close(struct jtdev *p)
 static int jtbitbang_set_fast_baud(struct jtdev *p, bool fast)
 {
 	int f;
-	// max bitbang baud is 1M
-	int baud = fast ? 1000000 : 9600;
+	int baud = fast ? 350000 : 9600;
 
 	if((f = ftdi_set_baudrate(p->handle, baud)) < 0) {
 		ftdi_print_err("unable to set ftdi baud", f, p);
 		return -1;
 	}
+	printc_dbg("jtdev: set ftdi baud to %d\n", baud);
 
 	return 0;
 }
@@ -289,15 +289,6 @@ static void fast_clock_and_dat(struct jtdev *p, uint8_t data_reg)
 static void jtbitbang_tclk_strobe(struct jtdev *p, unsigned int count)
 {
 	unsigned int i;
-	int f;
-
-	fast_flush(p);
-
-	// TCLK while performing flash ops must be 350KHz +- 100KHz
-	if((f = ftdi_set_baudrate(p->handle, 350000)) < 0) {
-		ftdi_print_err("unable to set ftdi baud", f, p);
-		return;
-	}
 
 	for (i = 0; i < count; i++) {
 		fast_push(p, p->data_register | TDI);
@@ -305,9 +296,6 @@ static void jtbitbang_tclk_strobe(struct jtdev *p, unsigned int count)
 	}
 
 	fast_flush(p);
-
-	// return to normal fast speeds
-	p->f->jtdev_set_fast_baud(p, true);
 }
 
 static void fast_tclk_prep (struct jtdev *p)
