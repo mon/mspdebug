@@ -164,7 +164,8 @@ static void jtbitbang_close(struct jtdev *p)
 static int jtbitbang_set_fast_baud(struct jtdev *p, bool fast)
 {
 	int f;
-	int baud = fast ? 350000 : 9600;
+	// 3MHz/350KHz
+	int baud = fast ? 3000000 : 350000;
 
 	if((f = ftdi_set_baudrate(p->handle, baud)) < 0) {
 		ftdi_print_err("unable to set ftdi baud", f, p);

@@ -51,14 +51,8 @@ static int read_words(device_t dev, const struct chipinfo_memory *m,
 {
   struct pif_device *pif = (struct pif_device *)dev;
   struct jtdev *p = &pif->jtag;
-  unsigned int index;
-  unsigned int word;
 
-  for ( index = 0; index < len; index += 2 ) {
-    word = jtag_read_mem( p, 16, addr+index );
-    data[index]   =  word       & 0x00ff;
-    data[index+1] = (word >> 8) & 0x00ff;
-  }
+  jtag_read_mem_quick(p, addr, len/2, (uint16_t*)data);
 
   return p->failed ? -1 : len;
 }
