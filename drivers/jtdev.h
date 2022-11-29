@@ -75,6 +75,12 @@ struct jtdev_func{
 	uint8_t (*jtdev_ir_shift)(struct jtdev *p, uint8_t ir);
 	uint8_t (*jtdev_dr_shift_8)(struct jtdev *p, uint8_t dr);
 	uint16_t (*jtdev_dr_shift_16)(struct jtdev *p, uint16_t dr);
+/* Sometimes a write-only version can be implemented faster */
+	void (*jtdev_ir_shift_wronly)(struct jtdev *p, uint8_t ir);
+	void (*jtdev_dr_shift_8_wronly)(struct jtdev *p, uint8_t dr);
+	void (*jtdev_dr_shift_16_wronly)(struct jtdev *p, uint16_t dr);
+/* If your write layer uses buffering, use this to flush writes */
+	void (*jtdev_flush_writes)(struct jtdev *p);
 	void (*jtdev_tms_sequence)(struct jtdev *p, int bits, unsigned int value);
 	void (*jtdev_init_dap)(struct jtdev *p);
 	int (*jtdev_set_fast_baud)(struct jtdev *p, bool fast);

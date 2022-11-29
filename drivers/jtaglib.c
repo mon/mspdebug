@@ -90,9 +90,13 @@
 #define jtag_led_red_on(p)	p->f->jtdev_led_red(p, 1)
 #define jtag_led_red_off(p)	p->f->jtdev_led_red(p, 0)
 
-#define jtag_ir_shift(p, ir) p->f->jtdev_ir_shift(p, ir)
-#define jtag_dr_shift_8(p, dr) p->f->jtdev_dr_shift_8(p, dr)
-#define jtag_dr_shift_16(p, dr) p->f->jtdev_dr_shift_16(p, dr)
+#define jtag_ir_shift(p, ir) (p->f->jtdev_ir_shift_wronly ? p->f->jtdev_ir_shift_wronly(p, ir) : p->f->jtdev_ir_shift(p, ir))
+#define jtag_dr_shift_8(p, dr) (p->f->jtdev_dr_shift_8_wronly ? p->f->jtdev_dr_shift_8_wronly(p, dr) : p->f->jtdev_dr_shift_8(p, dr))
+#define jtag_dr_shift_16(p, dr) (p->f->jtdev_dr_shift_16_wronly ? p->f->jtdev_dr_shift_16_wronly(p, dr) : p->f->jtdev_dr_shift_16(p, dr))
+#define jtag_ir_shift_and_read(p, ir) p->f->jtdev_ir_shift(p, ir)
+#define jtag_dr_shift_8_and_read(p, dr) p->f->jtdev_dr_shift_8(p, dr)
+#define jtag_dr_shift_16_and_read(p, dr) p->f->jtdev_dr_shift_16(p, dr)
+#define jtag_flush_writes(p) if(p->f->jtdev_flush_writes) { p->f->jtdev_flush_writes(p); }
 #define jtag_tms_sequence(p, bits, tms) p->f->jtdev_tms_sequence(p, bits, tms)
 #define jtag_init_dap(p) p->f->jtdev_init_dap(p)
 
@@ -124,6 +128,8 @@ static void jtag_default_reset_tap(struct jtdev *p)
 	jtag_tck_clr(p);
 	jtag_tms_clr(p);
 	jtag_tck_set(p);
+
+	jtag_flush_writes(p);
 }
 
 /* This function sets the target JTAG state machine
@@ -315,7 +321,7 @@ static int jtag_set_instruction_fetch(struct jtdev *p)
 	 * timeout after limited attempts
 	 */
 	for (loop_counter = 50; loop_counter > 0; loop_counter--) {
-		if ((jtag_dr_shift_16(p, 0x0000) & 0x0080) == 0x0080)
+		if ((jtag_dr_shift_16_and_read(p, 0x0000) & 0x0080) == 0x0080)
 			return 1;
 
 		jtag_tclk_clr(p); /* The TCLK pulse befor jtag_dr_shift_16 leads to   */
@@ -360,6 +366,7 @@ static void jtag_release_cpu(struct jtdev *p)
 	jtag_dr_shift_16(p, 0x2401);
 	jtag_ir_shift(p, IR_ADDR_CAPTURE);
 	jtag_tclk_set(p);
+	jtag_flush_writes(p);
 }
 
 /* Compares the computed PSA (Pseudo Signature Analysis) value to the PSA
@@ -430,7 +437,7 @@ static int jtag_verify_psa(struct jtdev *p,
 
 	/* Read out the PSA value */
 	jtag_ir_shift(p, IR_SHIFT_OUT_PSA);
-	psa_value = jtag_dr_shift_16(p, 0x0000);
+	psa_value = jtag_dr_shift_16_and_read(p, 0x0000);
 	jtag_tclk_set(p);
 
 	return (psa_value == psa_crc) ? 1 : 0;
@@ -484,9 +491,9 @@ unsigned int jtag_get_device(struct jtdev *p)
 	/* Wait until CPU is synchronized,
 	 * timeout after a limited number of attempts
 	 */
-	jtag_id = jtag_ir_shift(p, IR_CNTRL_SIG_CAPTURE);
+	jtag_id = jtag_ir_shift_and_read(p, IR_CNTRL_SIG_CAPTURE);
 	for ( loop_counter = 50; loop_counter > 0; loop_counter--) {
-		if ( (jtag_dr_shift_16(p, 0x0000) & 0x0200) == 0x0200 ) {
+		if ( (jtag_dr_shift_16_and_read(p, 0x0000) & 0x0200) == 0x0200 ) {
 			break;
 		}
 	}
@@ -547,7 +554,7 @@ uint16_t jtag_read_mem(struct jtdev *p,
 	jtag_tclk_clr(p);
 
 	/* shift out 16 bits */
-	content = jtag_dr_shift_16(p, 0x0000);
+	content = jtag_dr_shift_16_and_read(p, 0x0000);
 	jtag_tclk_set(p); /* is also the first instruction in jtag_release_cpu() */
 	jtag_release_cpu(p);
 	if (format == 8)
@@ -582,7 +589,7 @@ void jtag_read_mem_quick(struct jtdev *p,
 		jtag_tclk_set(p);
 		jtag_tclk_clr(p);
 		/* shift out the data from the target */
-		data[index] = jtag_dr_shift_16(p, 0x0000);
+		data[index] = jtag_dr_shift_16_and_read(p, 0x0000);
 	}
 
 	jtag_tclk_set(p);
@@ -668,7 +675,7 @@ int jtag_is_fuse_blown (struct jtdev *p)
 	/* First trial could be wrong */
 	for (loop_counter = 3; loop_counter > 0; loop_counter--) {
 		jtag_ir_shift(p, IR_CNTRL_SIG_CAPTURE);
-		if (jtag_dr_shift_16(p, 0xAAAA) == 0x5555)
+		if (jtag_dr_shift_16_and_read(p, 0xAAAA) == 0x5555)
 			/* Fuse is blown */
 			return 1;
 	}
@@ -697,7 +704,7 @@ unsigned int jtag_execute_puc(struct jtdev *p)
 	jtag_tclk_set(p);
 
 	/* Read jtag id */
-	jtag_id = jtag_ir_shift(p, IR_ADDR_CAPTURE);
+	jtag_id = jtag_ir_shift_and_read(p, IR_ADDR_CAPTURE);
 
 	/* Disable watchdog on target device */
 	jtag_write_mem(p, 16, 0x0120, 0x5A80);
@@ -742,6 +749,7 @@ void jtag_release_device(struct jtdev *p, address_t address)
 	jtag_dr_shift_16(p, 0x000f);
 
 	jtag_ir_shift(p, IR_CNTRL_SIG_RELEASE);
+	jtag_flush_writes(p);
 }
 
 /* Performs a verification over the given memory range
@@ -986,7 +994,7 @@ address_t jtag_read_reg(struct jtdev *p, int reg)
 
 	/* Read databus which contains the registers value */
 	jtag_ir_shift(p, IR_DATA_CAPTURE);
-	value = jtag_dr_shift_16(p, 0x0000);
+	value = jtag_dr_shift_16_and_read(p, 0x0000);
 
 	jtag_tclk_clr(p);
 
@@ -1036,6 +1044,7 @@ void jtag_write_reg(struct jtdev *p, int reg, address_t value)
 	/* JTAG controls RW & BYTE */
 	jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
 	jtag_dr_shift_16(p, 0x2401);
+	jtag_flush_writes(p);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1054,7 +1063,7 @@ void jtag_single_step( struct jtdev *p )
 	for (loop_counter = 10; loop_counter > 0; loop_counter--) {
 		jtag_tclk_clr(p);
 		jtag_tclk_set(p);
-		if ((jtag_dr_shift_16(p, 0x0000) & 0x0080) == 0x0080) {
+		if ((jtag_dr_shift_16_and_read(p, 0x0000) & 0x0080) == 0x0080) {
 			break;
 		}
 	}
@@ -1062,6 +1071,7 @@ void jtag_single_step( struct jtdev *p )
 	/* JTAG controls RW & BYTE */
 	jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
 	jtag_dr_shift_16(p, 0x2401);
+	jtag_flush_writes(p);
 
 	if (loop_counter == 0) {
 		/* timeout reached */
@@ -1125,11 +1135,12 @@ unsigned int jtag_set_breakpoint( struct jtdev *p,int bp_num, address_t bp_addr 
 	/* this will be undone and the bit for the new breakpoint set */
 	/* then the updated value is stored back                      */
 	jtag_ir_shift(p, IR_EMEX_DATA_EXCHANGE); //repeating may not needed
-	breakreact  = jtag_dr_shift_16(p, BREAKREACT + READ);
-	breakreact += jtag_dr_shift_16(p, 0x000);
+	breakreact  = jtag_dr_shift_16_and_read(p, BREAKREACT + READ);
+	breakreact += jtag_dr_shift_16_and_read(p, 0x000);
 	breakreact  = (breakreact >> 1) | (1 << bp_num);
 	jtag_dr_shift_16(p, BREAKREACT + WRITE);
 	jtag_dr_shift_16(p, breakreact);
+	jtag_flush_writes(p);
 	return 1;
 }
 
@@ -1138,7 +1149,7 @@ unsigned int jtag_cpu_state( struct jtdev *p )
 {
 	jtag_ir_shift(p, IR_EMEX_READ_CONTROL);
 
-	if ((jtag_dr_shift_16(p, 0x0000) & 0x0080) == 0x0080) {
+	if ((jtag_dr_shift_16_and_read(p, 0x0000) & 0x0080) == 0x0080) {
 		return 1; /* halted */
 	} else {
 		return 0; /* running */
@@ -1150,7 +1161,7 @@ int jtag_get_config_fuses( struct jtdev *p )
 {
     jtag_ir_shift(p, IR_CONFIG_FUSES);
 
-    return jtag_dr_shift_8(p, 0);
+    return jtag_dr_shift_8_and_read(p, 0);
 }
 
 /*----------------------------------------------------------------------------*/

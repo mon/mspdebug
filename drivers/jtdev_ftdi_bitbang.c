@@ -62,6 +62,8 @@ static const uint16_t default_pids[] = {
 static uint8_t fast_buf[64];
 static size_t fast_buf_i;
 
+static void fast_flush(struct jtdev *p);
+
 /*===== public functions =====================================================*/
 
 static void ftdi_print_err(const char *msg, int code, struct jtdev *p)
@@ -72,6 +74,8 @@ static void ftdi_print_err(const char *msg, int code, struct jtdev *p)
 static void do_bitbang_write(struct jtdev *p)
 {
 	int f;
+
+	fast_flush(p); // fast buffer incompatible with simple API
 
 	if((f = ftdi_write_data(p->handle, &p->data_register, 1)) < 0) {
 		ftdi_print_err("failed writing to FTDI port", f, p);
@@ -94,6 +98,8 @@ static int do_bitbang_read(struct jtdev *p, uint8_t bit)
 {
 	int f;
 	uint8_t buf;
+
+	fast_flush(p); // fast buffer incompatible with simple API
 
 	if((f = ftdi_read_pins(p->handle, &buf)) < 0) {
 		ftdi_print_err("failed reading from FTDI port", f, p);
@@ -312,7 +318,8 @@ static void fast_tclk_prep (struct jtdev *p)
 
 static unsigned int fast_shift( struct jtdev *p,
 				unsigned char num_bits,
-				unsigned int  data_out )
+				unsigned int  data_out,
+				bool          read)
 {
 	unsigned int data_in;
 	unsigned int mask;
@@ -335,9 +342,7 @@ static unsigned int fast_shift( struct jtdev *p,
 
 		// need to flush so jtdev_tdo_get has the right value. Tried to optimise
 		// using ftdi_read but speed actually decreased and logic was complex
-		fast_flush(p);
-
-		if (p->f->jtdev_tdo_get(p) == 1)
+		if (read && p->f->jtdev_tdo_get(p) == 1)
 			data_in |= mask;
 	}
 
@@ -347,13 +352,10 @@ static unsigned int fast_shift( struct jtdev *p,
 	/* Set JTAG state back to Run-Test/Idle */
 	fast_tclk_prep(p);
 
-	// Potentially returning to non-fast function, flush bytes
-	fast_flush(p);
-
 	return data_in;
 }
 
-static uint8_t fast_ir_shift(struct jtdev *p, uint8_t ir)
+static uint8_t fast_ir_shift_base(struct jtdev *p, uint8_t ir, bool read)
 {
 	/* JTAG state = Run-Test/Idle */
 	fast_clock_and_dat(p, p->data_register | TMS);
@@ -368,12 +370,12 @@ static uint8_t fast_ir_shift(struct jtdev *p, uint8_t ir)
 	fast_clock(p);
 
 	/* JTAG state = Shift-IR, Shift in TDI (8-bit) */
-	return fast_shift(p, 8, ir);
+	return fast_shift(p, 8, ir, read);
 
 	/* JTAG state = Run-Test/Idle */
 }
 
-static uint16_t fast_dr_shift_16(struct jtdev *p, uint16_t data)
+static uint16_t fast_dr_shift_16_base(struct jtdev *p, uint16_t data, bool read)
 {
 	/* JTAG state = Run-Test/Idle */
 	fast_clock_and_dat(p, p->data_register | TMS);
@@ -385,11 +387,30 @@ static uint16_t fast_dr_shift_16(struct jtdev *p, uint16_t data)
 	fast_clock(p);
 
 	/* JTAG state = Shift-DR, Shift in TDI (16-bit) */
-	return fast_shift(p, 16, data);
+	return fast_shift(p, 16, data, read);
 
 	/* JTAG state = Run-Test/Idle */
 }
 
+static uint8_t fast_ir_shift(struct jtdev *p, uint8_t ir)
+{
+	return fast_ir_shift_base(p, ir, true);
+}
+
+static uint16_t fast_dr_shift_16(struct jtdev *p, uint16_t data)
+{
+	return fast_dr_shift_16_base(p, data, true);
+}
+
+static void fast_ir_shift_wronly(struct jtdev *p, uint8_t ir)
+{
+	fast_ir_shift_base(p, ir, false);
+}
+
+static void fast_dr_shift_16_wronly(struct jtdev *p, uint16_t data)
+{
+	fast_dr_shift_16_base(p, data, false);
+}
 
 const struct jtdev_func jtdev_func_ftdi_bitbang = {
   // note: using open_ex as we need PID/VID populated
@@ -415,6 +436,9 @@ const struct jtdev_func jtdev_func_ftdi_bitbang = {
   // optimised sending for hot functions used for flash programming + reading
   .jtdev_ir_shift      = fast_ir_shift,
   .jtdev_dr_shift_16   = fast_dr_shift_16,
+  .jtdev_ir_shift_wronly = fast_ir_shift_wronly,
+  .jtdev_dr_shift_16_wronly = fast_dr_shift_16_wronly,
+  .jtdev_flush_writes  = fast_flush,
   // these aren't called too often and can be default
   .jtdev_dr_shift_8    = jtag_default_dr_shift_8,
   .jtdev_tms_sequence  = jtag_default_tms_sequence,
