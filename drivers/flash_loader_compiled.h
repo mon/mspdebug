@@ -27,7 +27,7 @@ static uint8_t flash_code_blob[] = {
 
 #define FLASH_CODE_PREAMBLE_LEN (FLASH_CODE_BLOCK_START - FLASH_CODE_RAM_START)
 
-_Static_assert(FLASH_CODE_BLOCK_LEN % 2 == 0);
+_Static_assert(FLASH_CODE_BLOCK_LEN % 2 == 0, "Block len is unaligned");
 
 typedef struct __attribute__((packed, aligned(2))) {
     // sync with onchip.c and MAKE SURE to swap pointers for raw uints
@@ -37,4 +37,6 @@ typedef struct __attribute__((packed, aligned(2))) {
     uint16_t wrtLenThis;
 } flash_code_header_t;
 
-_Static_assert(sizeof(flash_code_header_t) == (FLASH_CODE_START - FLASH_CODE_RAM_START));
+_Static_assert(
+    sizeof(flash_code_header_t) == (FLASH_CODE_START - FLASH_CODE_RAM_START),
+    "flash_code_header_t has an unexpected size");
