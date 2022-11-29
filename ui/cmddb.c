@@ -131,6 +131,13 @@ const struct cmddb_record commands[] = {
 "    Compare the contents of the given binary file to the device memory.\n"
 	},
 	{
+		.name = "prog_verify",
+		.func = cmd_prog_verify,
+		.help =
+"prog_verify <filename>\n"
+"    Same as 'prog <filename>; verify <filename>'.\n"
+	},
+	{
 		.name = "load_raw",
 		.func = cmd_load_raw,
 		.help =

@@ -32,6 +32,7 @@ int cmd_hexout(char **arg);
 int cmd_prog(char **arg);
 int cmd_load(char **arg);
 int cmd_verify(char **arg);
+int cmd_prog_verify(char **arg);
 int cmd_setbreak(char **arg);
 int cmd_setwatch(char **arg);
 int cmd_setwatch_r(char **arg);

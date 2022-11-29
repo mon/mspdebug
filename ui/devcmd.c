@@ -701,6 +701,19 @@ int cmd_verify(char **arg)
 	return do_cmd_prog(arg, PROG_VERIFY);
 }
 
+int cmd_prog_verify(char **arg)
+{
+	// arg is modified, so save it
+	char *arg_save = arg && *arg ? *arg : NULL;
+
+	int ret = do_cmd_prog(arg, PROG_WANT_ERASE);
+	if (ret != 0) {
+		return ret;
+	}
+
+	return do_cmd_prog(&arg_save, PROG_VERIFY);
+}
+
 static int do_setbreak(device_bptype_t type, char **arg)
 {
 	char *addr_text = get_arg(arg);
