@@ -38,6 +38,7 @@
 #include "jtaglib.h"
 #include "output.h"
 #include "eem_defs.h"
+#include "flash_loader_compiled.h"
 
 /* JTAG identification value for all existing Flash-based MSP430 devices
  */
@@ -774,94 +775,70 @@ int jtag_erase_check(struct jtdev *p,
  */
 void jtag_write_flash(struct jtdev *p,
 		      address_t start_address,
-		      unsigned int length,
+		      unsigned int length_words,
 		      const uint16_t *data)
 {
 	unsigned int index;
-	unsigned int address;
+	unsigned int length = length_words * 2;
 
 	jtag_led_red_on(p);
 
-	address = start_address;
-	jtag_halt_cpu(p);
-	jtag_tclk_clr(p);
+	flash_code_header_t flash_header = {0};
 
-	/* Set RW to write */
-	jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-	jtag_dr_shift_16(p, 0x2408);
+	// upload flash programming code
+	jtag_write_mem_quick(p, FLASH_CODE_START, sizeof(flash_code_blob)/2, (uint16_t*)flash_code_blob);
 
-	/* FCTL1 register */
-	jtag_ir_shift(p, IR_ADDR_16BIT);
-	jtag_dr_shift_16(p, 0x0128);
+	for(index = 0; index < length; index += FLASH_CODE_BLOCK_LEN) {
+		uint16_t this_block = length - index;
+		if(this_block > FLASH_CODE_BLOCK_LEN) {
+			this_block = FLASH_CODE_BLOCK_LEN;
+		}
 
-	/* Enable FLASH write */
-	jtag_ir_shift(p, IR_DATA_TO_ADDR);
-	jtag_dr_shift_16(p, 0xA540);
-	jtag_tclk_set(p);
-	jtag_tclk_clr(p);
+		flash_header.wrtLen = this_block / 2;
+		flash_header.pSrc = FLASH_CODE_BLOCK_START;
+		flash_header.pDst = start_address + index;
+		// wrtLenThis: only used by local code
 
-	/* FCTL2 register */
-	jtag_ir_shift(p, IR_ADDR_16BIT);
-	jtag_dr_shift_16(p, 0x012A);
+		// printc_dbg("Writing block %X-%X len %d\n", flash_header.pDst, flash_header.pDst + this_block, this_block);
 
-	/* Select MCLK as source, DIV=1 */
-	jtag_ir_shift(p, IR_DATA_TO_ADDR);
-	jtag_dr_shift_16(p, 0xA540);
-	jtag_tclk_set(p);
-	jtag_tclk_clr(p);
+		// flash data into memory
+		jtag_write_mem_quick(p, FLASH_CODE_BLOCK_START, this_block/2, &data[index/2]);
 
-	/* FCTL3 register */
-	jtag_ir_shift(p, IR_ADDR_16BIT);
-	jtag_dr_shift_16(p, 0x012C);
+		// params into memory
+		jtag_write_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_header)/2, (uint16_t*)&flash_header);
 
-	/* Clear FCTL3 register */
-	jtag_ir_shift(p, IR_DATA_TO_ADDR);
-	jtag_dr_shift_16(p, 0xA500);
-	jtag_tclk_set(p);
-	jtag_tclk_clr(p);
+		// start CPU
+		jtag_release_device(p, FLASH_CODE_START);
 
-	for (index = 0; index < length; index++) {
-		/* Set RW to write */
-		jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-		jtag_dr_shift_16(p, 0x2408);
+		// reading the output breaks the programming process because... I don't
+		// know, MSP JTAG is really bonkers... So we just wait the expected time
+		// and check at the end. We get about 500 bytes per 10ms. Add an extra
+		// 100ms for absolute surety.
+		delay_ms(100 + (this_block / 50));
 
-		/* Set address */
-		jtag_ir_shift(p, IR_ADDR_16BIT);
-		jtag_dr_shift_16(p, address);
+		if(jtag_read_mem(p, 16, FLASH_CODE_RAM_START) != 0x00) {
+			jtag_read_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_header)/2, (uint16_t*)&flash_header);
+			printc_err("Flash write failed at %04X, src=%04X len=%d  \n",
+				flash_header.pDst,
+				flash_header.pSrc,
+				flash_header.wrtLen
+			);
 
-		/* Set data */
-		jtag_ir_shift(p, IR_DATA_TO_ADDR);
-		jtag_dr_shift_16(p, data[index]);
-		jtag_tclk_set(p);
-		jtag_tclk_clr(p);
+			p->failed = 1;
+			return;
+		};
 
-		/* Set RW to read */
-		jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-		jtag_dr_shift_16(p, 0x2409);
-
-		/* provide TCLKs
-		 * min. 33 for F149 and F449
-		 */
-		p->f->jtdev_tclk_strobe(p, 35);
-		address += 2;
-
-		if (p->failed)
-			break;
+		// re-steal CPU execution
+		jtag_get_device(p);
 	}
 
-	/* Set RW to write */
-	jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-	jtag_dr_shift_16(p, 0x2408);
-
-	/* FCTL1 register */
-	jtag_ir_shift(p, IR_ADDR_16BIT);
-	jtag_dr_shift_16(p, 0x0128);
-
-	/* Disable FLASH write */
-	jtag_ir_shift(p, IR_DATA_TO_ADDR);
-	jtag_dr_shift_16(p, 0xA500);
-	jtag_tclk_set(p);
-	jtag_release_cpu(p);
+	// blow away all of our programming code with infinite loops in case it
+	// gets executed again
+	uint16_t boom[FLASH_CODE_PREAMBLE_LEN];
+	for(unsigned int i = 0; i < FLASH_CODE_PREAMBLE_LEN; i++) {
+		boom[i] = 0x3fff; // jmp $
+	}
+	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, FLASH_CODE_PREAMBLE_LEN, boom);
 
 	jtag_led_red_off(p);
 }
