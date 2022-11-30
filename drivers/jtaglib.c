@@ -34,11 +34,14 @@
  *              jtag_write_reg   corrected
  */
 
+#include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include "jtaglib.h"
 #include "output.h"
 #include "eem_defs.h"
 #include "flash_loader_compiled.h"
+#include "flash_verify_compiled.h"
 
 /* JTAG identification value for all existing Flash-based MSP430 devices
  */
@@ -764,6 +767,90 @@ int jtag_verify_mem(struct jtdev *p,
 	return jtag_verify_psa(p, start_address, length, data);
 }
 
+static uint16_t jtag_onchip_crc(const uint8_t data[], uint16_t length)
+{
+    uint16_t crc = 0xFFFF;
+    uint8_t x;
+
+        while(length--) {
+            x = ((crc >> 8) ^ *data++) & 0xFF;
+            x ^= x >> 4;
+            crc = (crc << 8) ^ (x << 12) ^ (x << 5) ^ x;
+        }
+
+    return crc;
+}
+
+/* Verifies an array of words into a FLASH by using a CRC
+ * algorithm on the chip itself. Return 0: fail, 1: success
+ * start_address: start in FLASH
+ * length       : number of words
+ * data         : pointer to data to compute CRC for
+ */
+int jtag_fast_verify_mem(struct jtdev *p,
+		      address_t start_address,
+		      unsigned int length_words,
+		      const uint16_t *data)
+{
+	unsigned int length = length_words * 2;
+	uint16_t expected_crc = jtag_onchip_crc((const uint8_t*)data, length);
+
+	jtag_led_green_on(p);
+
+	flash_verify_t flash_func = {
+		.data = start_address,
+		.len = length,
+	};
+	memcpy(flash_func.code, flash_verify_blob, sizeof(flash_verify_blob));
+
+	// upload flash programming code and variables
+	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_func)/2, (uint16_t*)&flash_func);
+
+	// start CPU
+	uint16_t code_start = offsetof(flash_verify_t, code) + FLASH_CODE_RAM_START;
+	jtag_release_device(p, code_start);
+
+	// We get about 123 bytes per 10ms. Add an extra 100ms for absolute surety.
+	delay_ms(100 + length / 10);
+
+	// re-steal CPU execution
+	jtag_get_device(p);
+
+	size_t header_len = sizeof(flash_func) - sizeof(flash_func.code);
+	jtag_read_mem_quick(p, FLASH_CODE_RAM_START, header_len/2, (uint16_t*)&flash_func);
+
+	if(flash_func.data != 0) {
+		printc_err("Flash verify timed out at %04X remaining=%d  \n",
+			flash_func.data,
+			flash_func.len
+		);
+
+		p->failed = 1;
+		return 0;
+	};
+
+	// blow away all of our programming code with infinite loops in case it
+	// gets executed again
+	uint16_t boom[sizeof(flash_func)/2];
+	for(unsigned int i = 0; i < sizeof(flash_func)/2; i++) {
+		boom[i] = 0x3fff; // jmp $
+	}
+	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_func)/2, boom);
+
+	jtag_led_green_off(p);
+
+	if(flash_func.crc != expected_crc) {
+		printc_err("Flash verify failed, expected CRC %04hX got %04hX\n",
+			expected_crc,
+			flash_func.crc
+		);
+
+		return 0;
+	};
+
+	return 1;
+}
+
 /* Performs an erase check over the given memory range
  * return: 1 - erase check was successful
  *         0 - otherwise
@@ -824,6 +911,9 @@ void jtag_write_flash(struct jtdev *p,
 		// 100ms for absolute surety.
 		delay_ms(100 + (this_block / 50));
 
+		// re-steal CPU execution
+		jtag_get_device(p);
+
 		if(jtag_read_mem(p, 16, FLASH_CODE_RAM_START) != 0x00) {
 			jtag_read_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_header)/2, (uint16_t*)&flash_header);
 			printc_err("Flash write failed at %04X, src=%04X len=%d  \n",
@@ -835,18 +925,15 @@ void jtag_write_flash(struct jtdev *p,
 			p->failed = 1;
 			return;
 		};
-
-		// re-steal CPU execution
-		jtag_get_device(p);
 	}
 
 	// blow away all of our programming code with infinite loops in case it
 	// gets executed again
-	uint16_t boom[FLASH_CODE_PREAMBLE_LEN];
-	for(unsigned int i = 0; i < FLASH_CODE_PREAMBLE_LEN; i++) {
+	uint16_t boom[FLASH_CODE_PREAMBLE_LEN/2];
+	for(unsigned int i = 0; i < FLASH_CODE_PREAMBLE_LEN/2; i++) {
 		boom[i] = 0x3fff; // jmp $
 	}
-	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, FLASH_CODE_PREAMBLE_LEN, boom);
+	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, FLASH_CODE_PREAMBLE_LEN/2, boom);
 
 	jtag_led_red_off(p);
 }

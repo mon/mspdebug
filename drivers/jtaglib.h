@@ -91,6 +91,11 @@ int jtag_verify_mem(struct jtdev *p,
 		    unsigned int word_count,
 		    const uint16_t *data);
 
+int jtag_fast_verify_mem(struct jtdev *p,
+		      address_t start_address,
+		      unsigned int length_words,
+		      const uint16_t *data);
+
 /* Performs an erase check over the given memory range */
 int jtag_erase_check(struct jtdev *p,
 		     address_t start_address,

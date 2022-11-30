@@ -32,6 +32,8 @@ int prog_flush(struct prog_data *prog)
 	if (!prog->len)
 		return 0;
 
+	int fast_verify = device_default->type->verifymem ? 1 : 0;
+
 	if (!prog->have_erased && (prog->flags & PROG_WANT_ERASE)) {
 		printc("Erasing...\n");
 		if (device_erase(DEVICE_ERASE_MAIN, 0) < 0)
@@ -41,29 +43,38 @@ int prog_flush(struct prog_data *prog)
 		prog->have_erased = 1;
 	}
 
-	printc_dbg("%s %4d bytes at %04x",
+	printc_dbg("%s%s %4d bytes at %04x",
 		   (prog->flags & PROG_VERIFY) ? "Verifying" : "Writing",
+		   (prog->flags & PROG_VERIFY) && fast_verify ? " (fast)" : "",
 		   prog->len, prog->addr);
 	if (prog->section[0])
 		printc_dbg(" [section: %s]", prog->section);
 	printc_dbg("...\n");
 
 	if (prog->flags & PROG_VERIFY) {
-		uint8_t cmp_buf[PROG_BUFSIZE];
-		int i;
-
-		if (device_readmem(prog->addr, cmp_buf, prog->len) < 0)
-			return -1;
-
-		for (i = 0; i < prog->len; i++)
-			if (cmp_buf[i] != prog->buf[i]) {
-				printc("\x1b[1mERROR:\x1b[0m "
-				       "mismatch at %04x (read %02x, "
-				       "expected %02x)\n",
-				       prog->addr + i,
-				       cmp_buf[i], prog->buf[i]);
+		// optional fast verify
+		if(fast_verify) {
+			if(device_verifymem(prog->addr, prog->buf, prog->len) < 0) {
+				printc("\x1b[1mERROR:\x1b[0m verify failed\n");
 				return -1;
 			}
+		} else {
+			uint8_t cmp_buf[PROG_BUFSIZE];
+			int i;
+
+			if (device_readmem(prog->addr, cmp_buf, prog->len) < 0)
+				return -1;
+
+			for (i = 0; i < prog->len; i++)
+				if (cmp_buf[i] != prog->buf[i]) {
+					printc("\x1b[1mERROR:\x1b[0m "
+					       "mismatch at %04x (read %02x, "
+					       "expected %02x)\n",
+					       prog->addr + i,
+					       cmp_buf[i], prog->buf[i]);
+					return -1;
+				}
+		}
 	} else {
 		if (device_writemem(prog->addr, prog->buf, prog->len) < 0)
 			return -1;

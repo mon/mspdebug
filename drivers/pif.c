@@ -167,6 +167,22 @@ static int pif_writemem( device_t       dev_base,
   return writemem(dev_base, addr, mem, len, write_words, read_words);
 }
 
+static int pif_verifymem( device_t  dev_base,
+			address_t addr,
+			uint8_t*  mem,
+			address_t len )
+{
+  struct pif_device *pif = (struct pif_device *)dev_base;
+  struct jtdev *p = &pif->jtag;
+  pif->jtag.failed = 0;
+
+  // can't get it to work
+  // int ret = jtag_verify_mem(p, addr, len/2, (uint16_t*)mem);
+  int ret = jtag_fast_verify_mem(p, addr, len/2, (uint16_t*)mem);
+
+  return p->failed ? -1 : (ret == 1 ? 0 : -1);
+}
+
 /*----------------------------------------------------------------------------*/
 static int pif_getregs(device_t dev_base, address_t *regs)
 {
@@ -485,6 +501,7 @@ const struct device_class device_pif = {
   .destroy  = pif_destroy,
   .readmem  = pif_readmem,
   .writemem = pif_writemem,
+  .verifymem = pif_verifymem,
   .getregs  = pif_getregs,
   .setregs  = pif_setregs,
   .ctl      = pif_ctl,
@@ -500,6 +517,7 @@ const struct device_class device_gpio = {
   .destroy  = pif_destroy,
   .readmem  = pif_readmem,
   .writemem = pif_writemem,
+  .verifymem = pif_verifymem,
   .getregs  = pif_getregs,
   .setregs  = pif_setregs,
   .ctl      = pif_ctl,
@@ -515,6 +533,7 @@ const struct device_class device_bp = {
   .destroy  = pif_destroy,
   .readmem  = pif_readmem,
   .writemem = pif_writemem,
+  .verifymem = pif_verifymem,
   .getregs  = pif_getregs,
   .setregs  = pif_setregs,
   .ctl      = pif_ctl,
@@ -530,6 +549,7 @@ const struct device_class device_ftdi_bitbang = {
   .destroy  = pif_destroy,
   .readmem  = pif_readmem,
   .writemem = pif_writemem,
+  .verifymem = pif_verifymem,
   .getregs  = pif_getregs,
   .setregs  = pif_setregs,
   .ctl      = pif_ctl,

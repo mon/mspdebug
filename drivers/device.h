@@ -108,6 +108,10 @@ struct device_class {
 	int (*writemem)(device_t dev, address_t addr,
 			const uint8_t *mem, address_t len);
 
+	/* Optional fast verify */
+	int (*verifymem)(device_t dev, address_t addr,
+			uint8_t *mem, address_t len);
+
 	/* Erase memory */
 	int (*erase)(device_t dev, device_erase_type_t type,
 		     address_t address);
@@ -179,6 +183,8 @@ extern device_t device_default;
 	device_default->type->readmem(device_default, addr, mem, len)
 #define device_writemem(addr, mem, len) \
 	device_default->type->writemem(device_default, addr, mem, len)
+#define device_verifymem(addr, mem, len) \
+	device_default->type->verifymem(device_default, addr, mem, len)
 #define device_getregs(regs) \
 	device_default->type->getregs(device_default, regs)
 #define device_setregs(regs) \
