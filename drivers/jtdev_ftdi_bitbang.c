@@ -297,12 +297,19 @@ static void jtbitbang_tclk_strobe(struct jtdev *p, unsigned int count)
 {
 	unsigned int i;
 
+	fast_flush(p);
+
+	// flash strobes must be at the slow 350KHz rate
+	p->f->jtdev_set_fast_baud(p, false);
+
 	for (i = 0; i < count; i++) {
 		fast_push(p, p->data_register | TDI);
 		fast_push(p, p->data_register & ~TDI);
 	}
 
 	fast_flush(p);
+
+	p->f->jtdev_set_fast_baud(p, true);
 }
 
 static void fast_tclk_prep (struct jtdev *p)
