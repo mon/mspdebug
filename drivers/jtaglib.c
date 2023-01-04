@@ -810,8 +810,10 @@ int jtag_fast_verify_mem(struct jtdev *p,
 	uint16_t code_start = offsetof(flash_verify_t, code) + FLASH_CODE_RAM_START;
 	jtag_release_device(p, code_start);
 
-	// We get about 123 bytes per 10ms. Add an extra 100ms for absolute surety.
-	delay_ms(100 + length / 10);
+	// We get about 123 bytes per 10ms. Some chips are much slower - have seen
+	// as low as 80 bytes per 10ms. So divide by 7 instead (extra 15%) and add
+	// an extra 100ms for absolute surety.
+	delay_ms(100 + length / 7);
 
 	// re-steal CPU execution
 	jtag_get_device(p);
