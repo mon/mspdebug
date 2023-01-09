@@ -36,7 +36,7 @@ int prog_flush(struct prog_data *prog)
 
 	if (!prog->have_erased && (prog->flags & PROG_WANT_ERASE)) {
 		printc("Erasing...\n");
-		if (device_erase(DEVICE_ERASE_MAIN, 0) < 0)
+		if (device_erase(DEVICE_ERASE_ALL, 0) < 0)
 			return -1;
 
 		printc("Programming...\n");
