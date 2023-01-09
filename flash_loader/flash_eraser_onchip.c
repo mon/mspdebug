@@ -36,7 +36,7 @@
 
 __attribute__((location(RAM_START))) volatile struct {
     uint8_t done;
-    uint8_t eraseType;
+    uint16_t fctl1;
     // set to 0x0FC10 for MAIN or ALL erase types
     volatile uint16_t *segmentAddr;
 } param;
@@ -68,31 +68,17 @@ void flash_erase()
     BCSCTL3 = LFXT1S1;
     DCOCTL = CALDCO_16MHZ;
 
-    // Clock source for flash timing generator
-    FCTL2 = FWKEY | FSSEL_1 | 0x002B;		// MCLK/44 clock source for flash timing generator
+    // Clock source for flash timing generator, MCLK/44
+    FCTL2 = FWKEY | FSSEL_1 | 0x002B;
 
     // Wait while busy
     while ( FCTL3 & BUSY );
 
-    // clear LOCK and set LOCKA if not wiping everything
-    if(param.eraseType == ERASE_TYPE_ALL)
-    {
-        FCTL3 = FWKEY;
-    }
-    else
-    {
-        FCTL3 = FWKEY | LOCKA;
-    }
+    // clear LOCK
+    FCTL3 = FWKEY;
 
     // Setup erase mode
-    if(param.eraseType == ERASE_TYPE_SEGMENT)
-    {
-        FCTL1 = FWKEY | ERASE;
-    }
-    else
-    {
-        FCTL1 = FWKEY | ERASE | MERAS;
-    }
+    FCTL1 = param.fctl1;
 
     // Perform erase by doing a dummy write
     *param.segmentAddr = 0;

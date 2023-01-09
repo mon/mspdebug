@@ -961,27 +961,14 @@ void jtag_erase_flash(struct jtdev *p,
 {
 	jtag_led_red_on(p);
 
-	uint8_t eraseType;
-	switch(erase_mode) {
-		default:
-		case JTAG_ERASE_MASS:
-			eraseType = 0;
-			// dummy write address in main memory for complete erase
-			erase_address = 0x0FC10;
-			break;
-		case JTAG_ERASE_MAIN:
-			eraseType = 1;
-			// dummy write address in main memory for complete erase
-			erase_address = 0x0FC10;
-			break;
-		case JTAG_ERASE_SGMT:
-			eraseType = 2;
-			break;
+	if(erase_mode != JTAG_ERASE_SGMT) {
+		// dummy write address in main memory for complete erase
+		erase_address = 0x0FC10;
 	}
 
 	flash_erase_t flash_func = {
 		.done = 0,
-		.eraseType = eraseType,
+		.fctl1 = erase_mode,
 		.segmentAddr = erase_address,
 	};
 	memcpy(flash_func.code, flash_erase_blob, sizeof(flash_erase_blob));

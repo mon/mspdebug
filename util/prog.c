@@ -35,9 +35,15 @@ int prog_flush(struct prog_data *prog)
 	int fast_verify = device_default->type->verifymem ? 1 : 0;
 
 	if (!prog->have_erased && (prog->flags & PROG_WANT_ERASE)) {
-		printc("Erasing...\n");
-		if (device_erase(DEVICE_ERASE_ALL, 0) < 0)
+		printc("Erasing main memory...\n");
+		if (device_erase(DEVICE_ERASE_MAIN, 0) < 0)
 			return -1;
+
+		// personal preference
+		printc("Erasing information registers B through D...\n");
+		device_erase(DEVICE_ERASE_SEGMENT, 0x1000);
+		device_erase(DEVICE_ERASE_SEGMENT, 0x1040);
+		device_erase(DEVICE_ERASE_SEGMENT, 0x1080);
 
 		printc("Programming...\n");
 		prog->have_erased = 1;

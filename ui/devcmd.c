@@ -207,6 +207,12 @@ int cmd_erase(char **arg)
 					   "0x%x\n", segment_size);
 				return -1;
 			}
+		} else if (!strcasecmp(type_text, "info")) {
+			// erase INFOD/INFOC/INFOB
+			// do not erase INFOA as it contains factory calibration data
+			segment = 0x1000; // INFOD
+			total_size = 64 * 3;
+			segment_size = 64;
 		} else {
 			printc_err("erase: unknown erase type: %s\n",
 				    type_text);
