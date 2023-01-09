@@ -38,6 +38,11 @@ __attribute__((location(RAM_START))) volatile struct {
 } param;
 
 // these don't get linked for some reason
+__attribute__((location(0x0056))) volatile unsigned char DCOCTL;
+__attribute__((location(0x0057))) volatile unsigned char BCSCTL1;
+__attribute__((location(0x0053))) volatile unsigned char BCSCTL3;
+__attribute__((location(0x10F9))) volatile unsigned char CALBC1_16MHZ;
+__attribute__((location(0x10F8))) volatile unsigned char CALDCO_16MHZ;
 __attribute__((location(0x0128))) volatile unsigned int FCTL1;
 __attribute__((location(0x012A))) volatile unsigned int FCTL2;
 __attribute__((location(0x012C))) volatile unsigned int FCTL3;
@@ -49,6 +54,13 @@ void main() {}
 __attribute__((location(RAM_START + sizeof(param)), retain, ramfunc, noreturn))
 void flash_write()
 {
+    // ACLK  = LPLF OSC for WD Timer (~12kHz)
+    // MCLK  = 16 MHz internal oscillator
+    // SMCLK = 16 MHz internal oscillator
+    BCSCTL1 = CALBC1_16MHZ;
+    BCSCTL3 = LFXT1S1;
+    DCOCTL = CALDCO_16MHZ;
+
     // Clock source for flash timing generator
 	FCTL2 = FWKEY | FSSEL_1 | 0x002B;		// MCLK/44 clock source for flash timing generator
 

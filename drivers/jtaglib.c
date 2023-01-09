@@ -40,6 +40,7 @@
 #include "jtaglib.h"
 #include "output.h"
 #include "eem_defs.h"
+#include "flash_erase_compiled.h"
 #include "flash_loader_compiled.h"
 #include "flash_verify_compiled.h"
 
@@ -810,10 +811,8 @@ int jtag_fast_verify_mem(struct jtdev *p,
 	uint16_t code_start = offsetof(flash_verify_t, code) + FLASH_CODE_RAM_START;
 	jtag_release_device(p, code_start);
 
-	// We get about 123 bytes per 10ms. Some chips are much slower - have seen
-	// as low as 80 bytes per 10ms. So divide by 7 instead (extra 15%) and add
-	// an extra 100ms for absolute surety.
-	delay_ms(100 + length / 7);
+	// This has been benched at about 160KB/s. Add extra 20ms (~3KB) for leeway.
+	delay_ms(20 + (length / 160));
 
 	// re-steal CPU execution
 	jtag_get_device(p);
@@ -896,7 +895,12 @@ void jtag_write_flash(struct jtdev *p,
 		flash_header.pDst = start_address + index;
 		// wrtLenThis: only used by local code
 
-		// printc_dbg("Writing block %X-%X len %d\n", flash_header.pDst, flash_header.pDst + this_block, this_block);
+		// printc_dbg("Writing block %X-%X len %d timeout %d\n",
+		// 	flash_header.pDst,
+		// 	flash_header.pDst + this_block,
+		// 	this_block,
+		// 	50 + (this_block / 36)
+		// );
 
 		// flash data into memory
 		jtag_write_mem_quick(p, FLASH_CODE_BLOCK_START, this_block/2, &data[index/2]);
@@ -909,16 +913,21 @@ void jtag_write_flash(struct jtdev *p,
 
 		// reading the output breaks the programming process because... I don't
 		// know, MSP JTAG is really bonkers... So we just wait the expected time
-		// and check at the end. We get about 500 bytes per 10ms. Add an extra
-		// 100ms for absolute surety.
-		delay_ms(100 + (this_block / 50));
+		// and check at the end. Empirical measurements give us about 36KB/s
+		// Add an extra 50ms for absolute surety.
+		delay_ms(50 + (this_block / 36));
 
 		// re-steal CPU execution
 		jtag_get_device(p);
 
 		if(jtag_read_mem(p, 16, FLASH_CODE_RAM_START) != 0x00) {
 			jtag_read_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_header)/2, (uint16_t*)&flash_header);
-			printc_err("Flash write failed at %04X, src=%04X len=%d  \n",
+
+			uint16_t bytes_written = flash_header.pDst - (start_address + index);
+			float percent = (float)bytes_written / (float)this_block;
+
+			printc_err("Flash write timed out at %d%% dst=%04X, src=%04X len=%d  \n",
+				(int)(percent * 100.f),
 				flash_header.pDst,
 				flash_header.pSrc,
 				flash_header.wrtLen
@@ -941,8 +950,8 @@ void jtag_write_flash(struct jtdev *p,
 }
 
 /* Performs a mass erase (with and w/o info memory) or a segment erase of a
- * FLASH module specified by the given mode and address. Large memory devices
- * get additional mass erase operations to meet the spec.
+ * FLASH module specified by the given mode and address. Uses an on-chip
+ * function to remove dependency on programmer clock.
  * erase_mode   : ERASE_MASS, ERASE_MAIN, ERASE_SGMT
  * erase_address: address within the selected segment
  */
@@ -950,88 +959,68 @@ void jtag_erase_flash(struct jtdev *p,
 		      unsigned int erase_mode,
 		      address_t erase_address)
 {
-	unsigned int number_of_strobes = 4820;	/* default for segment erase */
-	unsigned int loop_counter;
-	unsigned int max_loop_count = 1;	/* erase cycle repeating for mass erase */
-
 	jtag_led_red_on(p);
 
-	if ((erase_mode == JTAG_ERASE_MASS) ||
-	    (erase_mode == JTAG_ERASE_MAIN)) {
-		number_of_strobes = 5300;	/* Larger Flash memories require */
-		max_loop_count = 19;		/* additional cycles for erase. */
-		erase_address = 0xfffe;		/* overwrite given address */
+	uint8_t eraseType;
+	switch(erase_mode) {
+		default:
+		case JTAG_ERASE_MASS:
+			eraseType = 0;
+			// dummy write address in main memory for complete erase
+			erase_address = 0x0FC10;
+			break;
+		case JTAG_ERASE_MAIN:
+			eraseType = 1;
+			// dummy write address in main memory for complete erase
+			erase_address = 0x0FC10;
+			break;
+		case JTAG_ERASE_SGMT:
+			eraseType = 2;
+			break;
 	}
 
-	for (loop_counter = max_loop_count; loop_counter > 0; loop_counter--) {
-		jtag_halt_cpu(p);
-		jtag_tclk_clr(p);
+	flash_erase_t flash_func = {
+		.done = 0,
+		.eraseType = eraseType,
+		.segmentAddr = erase_address,
+	};
+	memcpy(flash_func.code, flash_erase_blob, sizeof(flash_erase_blob));
 
-		/* Set RW to write */
-		jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-		jtag_dr_shift_16(p, 0x2408);
+	// upload flash programming code and variables
+	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_func)/2, (uint16_t*)&flash_func);
 
-		/* FCTL1 address */
-		jtag_ir_shift(p, IR_ADDR_16BIT);
-		jtag_dr_shift_16(p, 0x0128);
+	// start CPU
+	uint16_t code_start = offsetof(flash_verify_t, code) + FLASH_CODE_RAM_START;
+	jtag_release_device(p, code_start);
 
-		/* Enable erase mode */
-		jtag_ir_shift(p, IR_DATA_TO_ADDR);
-		jtag_dr_shift_16(p, erase_mode);
-		jtag_tclk_set(p);
-		jtag_tclk_clr(p);
-
-		/* FCTL2 address */
-		jtag_ir_shift(p, IR_ADDR_16BIT);
-		jtag_dr_shift_16(p, 0x012A);
-
-		/* MCLK is source, DIV=1 */
-		jtag_ir_shift(p, IR_DATA_TO_ADDR);
-		jtag_dr_shift_16(p, 0xA540);
-		jtag_tclk_set(p);
-		jtag_tclk_clr(p);
-
-		/* FCTL3 address */
-		jtag_ir_shift(p, IR_ADDR_16BIT);
-		jtag_dr_shift_16(p, 0x012C);
-
-		/* Clear FCTL3 */
-		jtag_ir_shift(p, IR_DATA_TO_ADDR);
-		jtag_dr_shift_16(p, 0xA500);
-		jtag_tclk_set(p);
-		jtag_tclk_clr(p);
-
-		/* Set erase address */
-		jtag_ir_shift(p, IR_ADDR_16BIT);
-		jtag_dr_shift_16(p, erase_address);
-
-		/* Dummy write to start erase */
-		jtag_ir_shift(p, IR_DATA_TO_ADDR);
-		jtag_dr_shift_16(p, 0x55AA);
-		jtag_tclk_set(p);
-		jtag_tclk_clr(p);
-
-		/* Set RW to read */
-		jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-		jtag_dr_shift_16(p, 0x2409);
-
-		/* provide TCLKs */
-		p->f->jtdev_tclk_strobe(p, number_of_strobes);
-
-		/* Set RW to write */
-		jtag_ir_shift(p, IR_CNTRL_SIG_16BIT);
-		jtag_dr_shift_16(p, 0x2408);
-
-		/* FCTL1 address */
-		jtag_ir_shift(p, IR_ADDR_16BIT);
-		jtag_dr_shift_16(p, 0x0128);
-
-		/* Disable erase */
-		jtag_ir_shift(p, IR_DATA_TO_ADDR);
-		jtag_dr_shift_16(p, 0xA500);
-		jtag_tclk_set(p);
-		jtag_release_cpu(p);
+	if(erase_mode == JTAG_ERASE_SGMT) {
+		// 4819 flash clocks @ 350KHz = 13ms, double for leeway
+		delay_ms(26);
+	} else {
+		// 10593 flash clocks @ 350KHz = 30ms, double for leeway
+		delay_ms(60);
 	}
+
+	// re-steal CPU execution
+	jtag_get_device(p);
+
+	size_t header_len = sizeof(flash_func) - sizeof(flash_func.code);
+	jtag_read_mem_quick(p, FLASH_CODE_RAM_START, header_len/2, (uint16_t*)&flash_func);
+
+	if(flash_func.done != 1) {
+		printc_err("Flash erase didn't complete in time, delay is too short or chip is failing\n");
+
+		p->failed = 1;
+		return;
+	};
+
+	// blow away all of our programming code with infinite loops in case it
+	// gets executed again
+	uint16_t boom[sizeof(flash_func)/2];
+	for(unsigned int i = 0; i < sizeof(flash_func)/2; i++) {
+		boom[i] = 0x3fff; // jmp $
+	}
+	jtag_write_mem_quick(p, FLASH_CODE_RAM_START, sizeof(flash_func)/2, boom);
 
 	jtag_led_red_off(p);
 }
