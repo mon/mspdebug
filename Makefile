@@ -184,6 +184,7 @@ OBJ=\
     drivers/fet_error.o \
     drivers/fet_db.o \
     drivers/flash_bsl.o \
+    drivers/ftdi_dual.o \
     drivers/gdbc.o \
     drivers/sim.o \
     drivers/tilib.o \

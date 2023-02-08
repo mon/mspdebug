@@ -22,7 +22,7 @@
  */
 
 #include <stdint.h>
-#include <ftdi.h>
+#include "ftdi_dual.h"
 #include "jtaglib.h"
 #include "output.h"
 #include "util.h"
@@ -49,14 +49,6 @@
 
 #define OUT_BITS (TDI | TMS | TCK | RESET | 0xF0)
 
-#define DEFAULT_VID 0x0403
-static const uint16_t default_pids[] = {
-	0x6001, // FT232RL
-	0x6010, // FT2232HL
-	0x6011, // FT4232HL
-	0x6014, // FT232HL
-};
-
 // ft232r has 128 byte Tx buffer, but openocd suggests that anything larger than
 // 64 bytes causes hangups
 static uint8_t fast_buf[64];
@@ -68,7 +60,7 @@ static void fast_flush(struct jtdev *p);
 
 static void ftdi_print_err(const char *msg, int code, struct jtdev *p)
 {
-	printc_err("jtdev: %s: %d (%s)\n", msg, code, ftdi_get_error_string(p->handle));
+	printc_err("jtdev: %s: %d (%s)\n", msg, code, ftdi_dual_get_error_string(p->handle));
 }
 
 static void do_bitbang_write(struct jtdev *p)
@@ -77,7 +69,7 @@ static void do_bitbang_write(struct jtdev *p)
 
 	fast_flush(p); // fast buffer incompatible with simple API
 
-	if((f = ftdi_write_data(p->handle, &p->data_register, 1)) < 0) {
+	if((f = ftdi_dual_write_data(p->handle, &p->data_register, 1)) < 0) {
 		ftdi_print_err("failed writing to FTDI port", f, p);
 		p->failed = 1;
 		return;
@@ -101,7 +93,7 @@ static int do_bitbang_read(struct jtdev *p, uint8_t bit)
 
 	fast_flush(p); // fast buffer incompatible with simple API
 
-	if((f = ftdi_read_pins(p->handle, &buf)) < 0) {
+	if((f = ftdi_dual_read_pins(p->handle, &buf)) < 0) {
 		ftdi_print_err("failed reading from FTDI port", f, p);
 		p->failed = 1;
 		return 0;
@@ -113,33 +105,13 @@ static int do_bitbang_read(struct jtdev *p, uint8_t bit)
 static int jtbitbang_open_ex(struct jtdev *p, const char *device, const uint16_t *vid, const uint16_t *pid)
 {
 	int f = -1;
-	size_t i;
-	uint16_t _vid, _pid;
 
-	if ((p->handle = ftdi_new()) == NULL) {
-		printc_err("jtdev: ftdi_new failed\n");
+	if ((p->handle = ftdi_dual_open(vid, pid)) == NULL) {
+		printc_err("jtdev: ftdi_dual_open failed\n");
 		return -1;
 	}
 
-	if(vid == NULL && pid == NULL) {
-		// iterate through all the default VID/PID pairs for auto-detect
-		for(i = 0; i < ARRAY_LEN(default_pids) && f < 0; i++) {
-			f = ftdi_usb_open(p->handle, DEFAULT_VID, default_pids[i]);
-		}
-	} else {
-		// pick sane defaults if either provided
-		_vid = vid ? *vid : DEFAULT_VID;
-		_pid = pid ? *pid : 0x6010;
-		f = ftdi_usb_open(p->handle, _vid, _pid);
-	}
-
-	if(f < 0) {
-		ftdi_print_err("unable to open ftdi device", f, p);
-		p->f->jtdev_close(p);
-		return -1;
-	}
-
-	if((f = ftdi_set_bitmode(p->handle, OUT_BITS, BITMODE_BITBANG)) < 0) {
+	if((f = ftdi_dual_enable_bitbang(p->handle, OUT_BITS)) < 0) {
 		ftdi_print_err("unable to enable ftdi bitbang mode", f, p);
 		p->f->jtdev_close(p);
 		return -1;
@@ -159,9 +131,8 @@ static int jtbitbang_open_ex(struct jtdev *p, const char *device, const uint16_t
 static void jtbitbang_close(struct jtdev *p)
 {
 	if(p->handle != NULL) {
-		ftdi_set_bitmode(p->handle, OUT_BITS, BITMODE_RESET);
-		ftdi_usb_close(p->handle);
-		ftdi_free(p->handle);
+		ftdi_dual_disable_bitbang(p->handle, OUT_BITS);
+		ftdi_dual_close(p->handle);
 
 		p->handle = NULL;
 	}
@@ -173,7 +144,7 @@ static int jtbitbang_set_fast_baud(struct jtdev *p, bool fast)
 	// 3MHz/350KHz
 	int baud = fast ? 3000000 : 350000;
 
-	if((f = ftdi_set_baudrate(p->handle, baud)) < 0) {
+	if((f = ftdi_dual_set_baudrate(p->handle, baud)) < 0) {
 		ftdi_print_err("unable to set ftdi baud", f, p);
 		return -1;
 	}
@@ -260,7 +231,7 @@ static void fast_flush(struct jtdev *p)
 		return;
 	}
 
-	int f = ftdi_write_data(p->handle, fast_buf, fast_buf_i);
+	int f = ftdi_dual_write_data(p->handle, fast_buf, fast_buf_i);
 	fast_buf_i = 0;
 	if(f < 0) {
 		ftdi_print_err("failed writing to FTDI port", f, p);
