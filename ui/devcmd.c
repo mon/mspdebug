@@ -710,14 +710,17 @@ int cmd_verify(char **arg)
 int cmd_prog_verify(char **arg)
 {
 	// arg is modified, so save it
-	char *arg_save = arg && *arg ? *arg : NULL;
+	char *arg_save = arg && *arg ? strdup(*arg) : NULL;
 
 	int ret = do_cmd_prog(arg, PROG_WANT_ERASE);
 	if (ret != 0) {
 		return ret;
 	}
 
-	return do_cmd_prog(&arg_save, PROG_VERIFY);
+	ret = do_cmd_prog(&arg_save, PROG_VERIFY);
+	free(arg_save);
+
+	return ret;
 }
 
 static int do_setbreak(device_bptype_t type, char **arg)
